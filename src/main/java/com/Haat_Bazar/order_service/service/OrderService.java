@@ -28,10 +28,11 @@ public class OrderService {
     private final CartService cartService;
     private final RestTemplate restTemplate;
 
-    // Inventory is a field (stock) on Product inside product-service.
-    // GET /api/products/{id} returns { id, name, description, price, stock, category }
-    @Value("${product.service.url:http://localhost:8001}")
-    private String productServiceUrl;
+    // Sajib's inventory-service at port 8082
+    // GET  /api/inventory/{productId}                   → check stock
+    // PUT  /api/inventory/{productId}/reduce?quantity=N → deduct stock
+    @Value("${inventory.service.url:http://localhost:8082}")
+    private String inventoryServiceUrl;
 
     @Transactional
     public OrderResponse checkout(Long userId, CheckoutRequest checkoutRequest) {
@@ -45,8 +46,8 @@ public class OrderService {
             throw new InsufficientStockException("Cannot checkout: Cart is empty");
         }
 
-        // 3. Check Stock via product-service
-        checkStockViaProductService(cart.getItems());
+        // 3. Check stock via Sajib's inventory-service
+        checkInventoryStock(cart.getItems());
 
         // 4. Calculate Total
         Double total = cart.getCartTotal();
@@ -74,7 +75,10 @@ public class OrderService {
         Order savedOrder = orderRepository.save(order);
         log.info("Order created in PENDING status with ID: {}", savedOrder.getId());
 
-        // 7. Clear Cart
+        // 7. Deduct stock via Sajib's inventory-service
+        deductInventoryStock(cart.getItems());
+
+        // 8. Clear Cart
         cartService.clearCart(userId);
         log.info("Cleared shopping cart for user: {}", userId);
 
@@ -124,31 +128,53 @@ public class OrderService {
     }
 
     /**
-     * Check stock by calling GET /api/products/{id} on product-service.
-     * The ProductResponse contains a 'stock' Integer field.
+     * Check stock by calling GET /api/inventory/{productId} on Sajib's inventory-service.
+     * Response is expected to contain a 'stock' (or 'availableQuantity') integer field.
      */
-    private void checkStockViaProductService(List<CartItem> cartItems) {
+    private void checkInventoryStock(List<CartItem> cartItems) {
         for (CartItem item : cartItems) {
-            String url = productServiceUrl + "/api/products/" + item.getProductId();
+            String url = inventoryServiceUrl + "/api/inventory/" + item.getProductId();
             try {
-                Map<?, ?> product = restTemplate.getForObject(url, Map.class);
-                if (product == null) {
-                    throw new InsufficientStockException("Product not found: " + item.getProductId());
+                Map<?, ?> inventory = restTemplate.getForObject(url, Map.class);
+                if (inventory == null) {
+                    throw new InsufficientStockException("Inventory not found for product: " + item.getProductId());
                 }
-                Integer stock = (Integer) product.get("stock");
+                // Sajib's response may use 'stock' or 'availableQuantity' — try both
+                Integer stock = inventory.get("stock") != null
+                        ? (Integer) inventory.get("stock")
+                        : (Integer) inventory.get("availableQuantity");
                 if (stock == null || stock < item.getQuantity()) {
                     throw new InsufficientStockException(
                             "Insufficient stock for product ID " + item.getProductId() +
                             ". Available: " + (stock == null ? 0 : stock) +
                             ", Requested: " + item.getQuantity());
                 }
-                log.info("Stock OK for product {}: available={}, requested={}", item.getProductId(), stock, item.getQuantity());
+                log.info("Stock OK for product {}: available={}, requested={}",
+                        item.getProductId(), stock, item.getQuantity());
             } catch (InsufficientStockException e) {
                 throw e;
             } catch (Exception e) {
-                log.error("Error calling product-service for product {}: {}", item.getProductId(), e.getMessage());
+                log.error("Error calling inventory-service for product {}: {}", item.getProductId(), e.getMessage());
                 throw new InsufficientStockException(
-                        "Could not verify stock for product ID " + item.getProductId() + ". Product service unavailable.");
+                        "Could not verify stock for product ID " + item.getProductId() + ". Inventory service unavailable.");
+            }
+        }
+    }
+
+    /**
+     * Deduct stock by calling PUT /api/inventory/{productId}/reduce?quantity={amount}
+     * on Sajib's inventory-service.
+     */
+    private void deductInventoryStock(List<CartItem> cartItems) {
+        for (CartItem item : cartItems) {
+            String url = inventoryServiceUrl + "/api/inventory/" + item.getProductId()
+                    + "/reduce?quantity=" + item.getQuantity();
+            try {
+                restTemplate.put(url, null);
+                log.info("Stock deducted for product {}: quantity={}", item.getProductId(), item.getQuantity());
+            } catch (Exception e) {
+                log.error("Failed to deduct stock for product {}: {}", item.getProductId(), e.getMessage());
+                // Log but don't fail — order is already saved; a retry/saga can handle this
             }
         }
     }
