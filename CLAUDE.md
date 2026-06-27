@@ -1,66 +1,127 @@
-# Haat-Bazar — Claude Context
+# Haat-Bazar — Architecture & Integration Guide
 
-## Who I Am
-Adib (ihfaz297). CS student, new-ish to dev but learns fast. Comfortable with Node.js/Express/MongoDB. Java-familiar but Spring Boot is new. Not scared of code — just scared of time.
+## Team
+| Person | Service | Status |
+|---|---|---|
+| Tonoy | product-service | Complete, merged to main |
+| Sajib | auth-service | Complete, merged to main |
+| Pitom | order-service | Complete, merged to main |
+| Adib | payment-service | Complete, merged to main |
+| Sanjoy | backup-service | Pending merge |
+| Adib | eureka-server + api-gateway | Complete, on main |
 
-## The Project
-**Haat-Bazar** — Cloud-based e-commerce system. SWE & Design Patterns course project. Team of 6. Deadline ~4 days from 2026-06-19.
+## Services & Ports
+| Service | Port | Database |
+|---|---|---|
+| eureka-server | 8761 | — |
+| api-gateway | 8080 | — |
+| auth-service | 8081 | auth_db |
+| product-service | 8082 | product_db |
+| payment-service | 8083 | payment_db |
+| order-service | 8084 | haat_bazar_order |
 
-The SRS, proposal, and class diagram are all already written and in this repo. The actual backend code lives in the **team repo: github.com/sedboisanjoy/haat-bazar** (I'm a collaborator).
+## Startup Order
+1. eureka-server (8761) — must be first, everything registers here
+2. auth-service (8081)
+3. product-service (8082)
+4. order-service (8084)
+5. payment-service (8083)
+6. api-gateway (8080) — last
 
-## My Job
-I am the **system architect**. My services to build (in Spring Boot/Java):
-1. **Shopping Cart & Order Service** — cart CRUD, cart→order conversion, order lifecycle (PENDING→SHIPPED→DELIVERED), calls Inventory service to deduct stock on checkout
-2. **Payment Gateway Service** — Strategy pattern for Card/Bkash/Nagad, notifies Order service on success
-3. **Deployment** — Docker, NGINX reverse proxy (later, after services are built)
+Verify all services appear at `http://localhost:8761` before testing.
 
-## Teammate's Work
-- **Sajib (sedboisanjoy)** — Auth Service + Inventory Service. PR expected end of day 2026-06-19. Once his PR merges, I branch off main with `git checkout -b feature/cart-service`.
+## Running a Service
+```bash
+cd <service-folder>
+mvn spring-boot:run
+```
+MySQL must be running with username `root` and password `root`. Databases are created automatically on first startup (`createDatabaseIfNotExist=true`).
 
-## Current State (as of 2026-06-26)
-- Team repo (`haatbazar-backend/`) now has 6 scaffolded services: auth-service, product-service, eureka-server, api-gateway, order-service, payment-service.
-- auth-service and product-service are fully implemented by teammates.
-- order-service is Adib's — not started yet. payment-service is COMPLETE.
-- Stack: Spring Boot 3.5.15, Java 17, MySQL (no H2), Eureka service discovery, OpenFeign for inter-service calls.
-- Inventory is NOT a separate service — stock is a field on Product entity in product-service.
-- Cart logic goes inside order-service (no separate cart-service).
+## Shared JWT Secret (ALL services must use this)
+```
+HaatBazarSuperSecretKeyWhichIsAtLeast256BitsLongForSecurityPurpose
+```
+Set in each service's `application.properties`:
+```properties
+jwt.secret=HaatBazarSuperSecretKeyWhichIsAtLeast256BitsLongForSecurityPurpose
+```
 
-## Payment Service (COMPLETE as of 2026-06-26)
-All files in `haatbazar-backend/payment-service/`:
-- `application.properties` — port 8083, payment_db, Eureka config
-- `pom.xml` — OpenFeign added
-- `PaymentServiceApplication.java` — @EnableFeignClients added
-- `entity/PaymentMethod.java`, `PaymentStatus.java`, `Payment.java`
-- `dto/PaymentRequest.java`, `PaymentResponse.java`
-- `strategy/PaymentStrategy.java` — interface + Card/Bkash/Nagad impls
-- `repository/PaymentRepository.java` — JpaRepository + findByOrderId
-- `client/OrderServiceClient.java` — Feign stub to ORDER-SERVICE, calls PUT /api/orders/{orderId}/mark-paid
-- `service/PaymentService.java` + `PaymentServiceImpl.java` — strategy selection, save, notify order
-- `controller/PaymentController.java` — POST /api/payments, GET /api/payments/order/{orderId}
-- Committed and pushed to `feature/payment-service` branch
+## API Endpoints
 
-## Architecture
-- Microservices, each service is its own Spring Boot app
-- Clean Architecture: Controller → Service → Repository
-- NGINX API Gateway as reverse proxy (routing to services)
-- JWT-based auth, RBAC (Customer / Seller / Admin)
-- Inter-service calls via REST (RestTemplate or WebClient)
+### auth-service (8081) — /api/auth
+| Method | Path | Description |
+|---|---|---|
+| POST | /api/auth/register | Register new user |
+| POST | /api/auth/login | Login, returns JWT |
 
-## Design Patterns Required by Course
-- **Strategy** — Payment methods (Card, Bkash, Nagad)
-- **Repository** — Spring Data JPA repositories
-- **SOLID principles** throughout
+### product-service (8082) — /api/products + /api/inventory
+| Method | Path | Description |
+|---|---|---|
+| GET | /api/products | List all products |
+| POST | /api/products | Create product |
+| GET | /api/products/{id} | Get product |
+| GET | /api/inventory/{productId} | Check stock |
+| PUT | /api/inventory/{productId}/reduce?quantity=N | Deduct stock |
 
-## My Previous Relevant Work
-I built a Node.js LMS backend (`D:\haat-bazar\lms-project-api\lms-backend`) with:
-- JWT auth, bcrypt passwords
-- Course enrollment flow with bank payment API integration
-- Axios for inter-service HTTP calls
+### order-service (8084) — /api/cart + /api/orders
+| Method | Path | Description |
+|---|---|---|
+| POST | /api/cart/{userId}/items | Add item to cart |
+| GET | /api/cart/{userId} | Get cart |
+| PUT | /api/cart/{userId}/items/{productId} | Update cart item |
+| DELETE | /api/cart/{userId}/items/{productId} | Remove cart item |
+| POST | /api/orders/checkout/{userId} | Checkout cart → creates order |
+| GET | /api/orders/{id} | Get order |
+| GET | /api/orders/user/{userId} | Get orders by user |
+| PUT | /api/orders/{orderId}/mark-paid | Called by payment-service |
 
-The payment service here is basically the same mental model — map Express patterns to Spring Boot equivalents.
+### payment-service (8083) — /api/payments
+| Method | Path | Description |
+|---|---|---|
+| POST | /api/payments | Process payment (Card/Bkash/Nagad) |
+| GET | /api/payments/order/{orderId} | Get payment by order |
 
-## What to Focus On When Helping Me
-- Map Spring Boot concepts to their Express equivalents I already know
-- Don't over-explain REST/HTTP/JSON basics
-- Prioritize getting working code fast over perfect architecture
-- When I paste a PR or code, help me review it in context of this project
+## Inter-Service Calls
+
+### order-service → product-service (inventory check + deduct)
+```
+GET http://localhost:8082/api/inventory/{productId}
+PUT http://localhost:8082/api/inventory/{productId}/reduce?quantity=N
+```
+Response field is `quantity` (not `stock` or `availableQuantity`).
+
+### payment-service → order-service (mark paid)
+```
+PUT http://localhost:8083/api/orders/{orderId}/mark-paid
+```
+Called via OpenFeign client using Eureka name `ORDER-SERVICE`.
+
+## api-gateway Routes (8080)
+All requests can go through `localhost:8080` instead of individual ports:
+| Path prefix | Forwards to |
+|---|---|
+| /api/auth/** | AUTH-SERVICE |
+| /api/products/** | PRODUCT-SERVICE |
+| /api/inventory/** | PRODUCT-SERVICE |
+| /api/orders/** | ORDER-SERVICE |
+| /api/cart/** | ORDER-SERVICE |
+| /api/payments/** | PAYMENT-SERVICE |
+
+## Design Patterns
+- **Strategy** — payment-service: `PaymentStrategy` interface with `CardPaymentStrategy`, `BkashPaymentStrategy`, `NagadPaymentStrategy`
+- **Repository** — all services use Spring Data JPA repositories
+- **SOLID** — Controller → Service → Repository layering throughout
+
+## Tech Stack
+- Spring Boot 3.5.15, Java 17
+- Spring Cloud 2025.0.3 (Eureka, OpenFeign)
+- MySQL (no H2)
+- Spring Security + JWT (jjwt 0.11.5)
+- Lombok
+
+## Common Pitfalls
+- `spring.application.name` must be UPPERCASE — Eureka load balancer uses it for routing
+- All services must share the same JWT secret or token validation fails across services
+- `target/` should never be committed — it's in `.gitignore`
+- product-service inventory response field is `quantity` (not `stock` or `availableQuantity`)
+- Start eureka-server first — services that start before it will fail to register
