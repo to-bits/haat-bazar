@@ -139,10 +139,12 @@ public class OrderService {
                 if (inventory == null) {
                     throw new InsufficientStockException("Inventory not found for product: " + item.getProductId());
                 }
-                // Sajib's response may use 'stock' or 'availableQuantity' — try both
+                // Tonoy's InventoryResponse uses 'quantity'; also check 'stock' and 'availableQuantity' for safety
                 Integer stock = inventory.get("stock") != null
                         ? (Integer) inventory.get("stock")
-                        : (Integer) inventory.get("availableQuantity");
+                        : inventory.get("availableQuantity") != null
+                            ? (Integer) inventory.get("availableQuantity")
+                            : (Integer) inventory.get("quantity");
                 if (stock == null || stock < item.getQuantity()) {
                     throw new InsufficientStockException(
                             "Insufficient stock for product ID " + item.getProductId() +
