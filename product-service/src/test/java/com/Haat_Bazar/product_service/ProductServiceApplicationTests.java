@@ -1,4 +1,4 @@
-package com.Haat_Bazar.Product_service;
+package com.Haat_Bazar.product_service;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
