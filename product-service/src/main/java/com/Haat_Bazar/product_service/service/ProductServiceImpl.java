@@ -32,15 +32,11 @@ public class ProductServiceImpl
             ProductRequest request
     ) {
 
-        Category category =
-                categoryRepository.findById(
-                                request.getCategoryId()
-                        )
-                        .orElseThrow(() ->
-                                new ResourceNotFoundException(
-                                        "Category not found"
-                                )
-                        );
+        Category category = null;
+        if (request.getCategoryId() != null) {
+            category = categoryRepository.findById(request.getCategoryId())
+            .orElseThrow(() -> new ResourceNotFoundException("Category not found"));
+        }
 
         Product product = Product.builder()
                 .name(request.getName())
@@ -150,7 +146,7 @@ public class ProductServiceImpl
                 .description(product.getDescription())
                 .price(product.getPrice())
                 .stock(product.getStock())
-                .category(product.getCategory().getName())
+                .category(product.getCategory() != null ? product.getCategory().getName() : null)
                 .build();
     }
 }
